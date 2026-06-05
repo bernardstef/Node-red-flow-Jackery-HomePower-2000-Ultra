@@ -1,0 +1,318 @@
+[
+    {
+        "id": "fn_jackery_route",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Route",
+        "func": "let token = flow.get('jackery_access_token');\nlet tokenExpire = flow.get('jackery_token_expire') || 0;\nlet systemId = flow.get('jackery_system_id');\nlet now = Date.now();\n\n// Si pas de token ou token expiré -> login\nif (!token || now > tokenExpire) {\n    return [msg, null, null];\n}\n\n// Si token OK mais pas encore de systemId -> liste systèmes\nif (!systemId) {\n    return [null, msg, null];\n}\n\n// Sinon -> monitor snapshot\nreturn [null, null, msg];",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 100,
+        "wires": [
+            [
+                "fn_jackery_prepare_login"
+            ],
+            [
+                "fn_jackery_prepare_systems"
+            ],
+            [
+                "fn_jackery_prepare_monitor"
+            ]
+        ]
+    },
+    {
+        "id": "fn_jackery_prepare_login",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Prepare login",
+        "func": "// ===== CONFIG =====\n// Idéalement via variables d'environnement Node-RED :\n// JACKERY_ACCOUNT et JACKERY_PASSWORD\n\nlet account = env.get('JACKERY_ACCOUNT') || 'your-jackery-email-address';\nlet password = env.get('JACKERY_PASSWORD') || 'Your-pass';\n\nlet baseUrl = 'https://prodeu-energymanagement-api.hello-tech.com:8000/geneverse-iot-gateway';\nflow.set('jackery_base_url', baseUrl);\n\nmsg.method = 'POST';\nmsg.url = baseUrl + '/geneverse-iot-home/v1/home/auth/login';\n\nmsg.headers = {\n    'user-agent': 'Dart/3.11 (dart:io)',\n    'accept-language': 'en-US',\n    'model': 'Phone',\n    'accept-encoding': 'gzip',\n    'x-app-name': 'Custom-Phone',\n    'content-type': 'application/json;charset=UTF-8',\n    'x-app-version': 'home_android_v2.10.22',\n    'sdkint': '34',\n    'id': 'UP1A.231105.003.A1',\n    'userend': 'HOME'\n};\n\nmsg.payload = {\n    encrypted: false,\n    userEnd: 'HOME',\n    userType: '2',\n    account: account,\n    password: password,\n    phoneUid: 'node-red-jackery-home',\n    loginType: 1,\n    rememberMe: false,\n    clientType: 'APP'\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 60,
+        "wires": [
+            [
+                "http_jackery_login"
+            ]
+        ]
+    },
+    {
+        "id": "http_jackery_login",
+        "type": "http request",
+        "z": "tab_jackery_home_cloud",
+        "name": "HTTP login",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": true,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 870,
+        "y": 60,
+        "wires": [
+            [
+                "fn_jackery_save_login"
+            ]
+        ]
+    },
+    {
+        "id": "fn_jackery_save_login",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Save token",
+        "func": "if (!msg.payload || msg.payload.success !== true) {\n    node.error('Login Jackery échoué', msg);\n    return null;\n}\n\nlet result = msg.payload.result || {};\nlet accessToken = result.accessToken;\nlet refreshToken = result.refreshToken;\nlet tokenPrefix = result.tokenPrefix || 'Bearer';\n\nif (!accessToken) {\n    node.error('Login OK mais accessToken manquant', msg);\n    return null;\n}\n\nflow.set('jackery_access_token', accessToken);\nflow.set('jackery_refresh_token', refreshToken);\nflow.set('jackery_token_prefix', tokenPrefix);\n\n// Sécurité : on force renouvellement après 50 min\nflow.set('jackery_token_expire', Date.now() + 50 * 60 * 1000);\n\nnode.status({fill:'green', shape:'dot', text:'login OK'});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1090,
+        "y": 60,
+        "wires": [
+            [
+                "fn_jackery_prepare_systems"
+            ]
+        ]
+    },
+    {
+        "id": "fn_jackery_prepare_systems",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Prepare systems",
+        "func": "let baseUrl = flow.get('jackery_base_url') || 'https://prodeu-energymanagement-api.hello-tech.com:8000/geneverse-iot-gateway';\nlet token = flow.get('jackery_access_token');\nlet prefix = flow.get('jackery_token_prefix') || 'Bearer';\n\nif (!token) return null;\n\nmsg.method = 'GET';\nmsg.url = baseUrl + '/geneverse-iot-home/v1/system/listByUserV2';\nmsg.headers = {\n    'user-agent': 'Dart/3.11 (dart:io)',\n    'accept-language': 'en-US',\n    'model': 'Phone',\n    'accept-encoding': 'gzip',\n    'x-app-name': 'Custom-Phone',\n    'content-type': 'application/json;charset=UTF-8',\n    'x-app-version': 'home_android_v2.10.22',\n    'sdkint': '34',\n    'id': 'UP1A.231105.003.A1',\n    'userend': 'HOME',\n    'authorization': prefix + ' ' + token\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 140,
+        "wires": [
+            [
+                "http_jackery_systems"
+            ]
+        ]
+    },
+    {
+        "id": "http_jackery_systems",
+        "type": "http request",
+        "z": "tab_jackery_home_cloud",
+        "name": "HTTP systems",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": true,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 870,
+        "y": 140,
+        "wires": [
+            [
+                "fn_jackery_save_system"
+            ]
+        ]
+    },
+    {
+        "id": "fn_jackery_save_system",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Save systemId",
+        "func": "if (!msg.payload || msg.payload.success !== true) {\n    node.error('Erreur récupération systems Jackery', msg);\n    return null;\n}\n\nlet systems = msg.payload.result || [];\nif (!Array.isArray(systems) || systems.length === 0) {\n    node.error('Aucun système Jackery trouvé sur ce compte', msg);\n    return null;\n}\n\n// Par défaut : premier système du compte\nlet system = systems[0];\nlet systemId = system.id || system.systemId;\n\nif (!systemId) {\n    node.error('systemId introuvable', msg);\n    return null;\n}\n\nflow.set('jackery_system_id', String(systemId));\nflow.set('jackery_system_raw', system);\n\nnode.status({fill:'green', shape:'dot', text:'systemId ' + systemId});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1100,
+        "y": 140,
+        "wires": [
+            [
+                "fn_jackery_prepare_monitor"
+            ]
+        ]
+    },
+    {
+        "id": "fn_jackery_prepare_monitor",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Prepare monitor",
+        "func": "let baseUrl = flow.get('jackery_base_url') || 'https://prodeu-energymanagement-api.hello-tech.com:8000/geneverse-iot-gateway';\nlet token = flow.get('jackery_access_token');\nlet prefix = flow.get('jackery_token_prefix') || 'Bearer';\nlet systemId = flow.get('jackery_system_id');\n\nif (!token || !systemId) return null;\n\nmsg.method = 'POST';\nmsg.url = baseUrl + '/geneverse-iot-home/v1/app/monitor/';\nmsg.headers = {\n    'user-agent': 'Dart/3.11 (dart:io)',\n    'accept-language': 'en-US',\n    'model': 'Phone',\n    'accept-encoding': 'gzip',\n    'x-app-name': 'Custom-Phone',\n    'content-type': 'application/json;charset=UTF-8',\n    'x-app-version': 'home_android_v2.10.22',\n    'sdkint': '34',\n    'id': 'UP1A.231105.003.A1',\n    'userend': 'HOME',\n    'authorization': prefix + ' ' + token\n};\n\nmsg.payload = {\n    systemId: systemId\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 220,
+        "wires": [
+            [
+                "http_jackery_monitor"
+            ]
+        ]
+    },
+    {
+        "id": "http_jackery_monitor",
+        "type": "http request",
+        "z": "tab_jackery_home_cloud",
+        "name": "HTTP monitor",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": true,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 870,
+        "y": 220,
+        "wires": [
+            [
+                "fn_jackery_normalize"
+            ]
+        ]
+    },
+    {
+        "id": "fn_jackery_normalize",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery - Normalize values",
+        "func": "if (!msg.payload || msg.payload.success !== true) {\n    node.error('Erreur monitor Jackery', msg);\n    return null;\n}\n\nlet root = msg.payload.result || msg.payload;\nlet flowChart = root.energyFlowChartVO || {};\nlet ems = flowChart.emsGwVO || {};\nlet pvInfo = flowChart.pvInfo || {};\nlet acInfo = flowChart.acInfo || {};\nlet acMain = flowChart.acMainVO || {};\nlet grid = flowChart.gridVO || {};\nlet otherLoad = flowChart.otherLoadVO || {};\n\nlet packs = ems.powerPackList || [];\n\nlet data = {\n    // Batterie globale\n    battery_soc: ems.soc !== undefined ? Math.round(Number(ems.soc)) : undefined,\n    battery_energy_kwh: ems.energyRemain !== undefined ? Number(ems.energyRemain) : undefined,\n\n    // Batteries séparées\n    pack1_soc: packs[0]?.soc !== undefined ? Math.round(Number(packs[0].soc)) : undefined,\n    pack1_energy_kwh: packs[0]?.energyRemain !== undefined ? Number(packs[0].energyRemain) : undefined,\n\n    pack2_soc: packs[1]?.soc !== undefined ? Math.round(Number(packs[1].soc)) : undefined,\n    pack2_energy_kwh: packs[1]?.energyRemain !== undefined ? Number(packs[1].energyRemain) : undefined,\n\n    // Puissances\n    pv_power: pvInfo.pvPower !== undefined ? Math.round(Number(pvInfo.pvPower)) : undefined,\n    pv1_power: Array.isArray(pvInfo.pvPowerList) ? Math.round(Number(pvInfo.pvPowerList[0] || 0)) : undefined,\n    pv2_power: Array.isArray(pvInfo.pvPowerList) ? Math.round(Number(pvInfo.pvPowerList[1] || 0)) : undefined,\n\n    grid_power: grid.gridPower !== undefined ? Math.round(Number(grid.gridPower)) : undefined,\n    ac_main_power: acMain.acMainPower !== undefined ? Math.round(Number(acMain.acMainPower)) : undefined,\n    other_load_power: otherLoad.otherLoadPower !== undefined ? Math.round(Number(otherLoad.otherLoadPower)) : undefined,\n    eps_load_power: acInfo.epsLoadPower !== undefined ? Math.round(Number(acInfo.epsLoadPower)) : undefined,\n\n    // États utiles\n    charge_status: ems.chargeStatus,\n    work_status: ems.workStatus,\n    work_mode: ems.workMode,\n    grid_conn_status: ems.gridConnStatus,\n\n    raw: root\n};\n\n// Compatibilité avec l'ancien flow\ndata.battery_energy = data.battery_energy_kwh;\ndata.load_power = data.other_load_power;\n\n// Variables globales\nglobal.set('jackery_battery_soc', data.battery_soc);\nglobal.set('jackery_battery_energy_kwh', data.battery_energy_kwh);\n\nglobal.set('jackery_pack1_soc', data.pack1_soc);\nglobal.set('jackery_pack1_energy_kwh', data.pack1_energy_kwh);\nglobal.set('jackery_pack2_soc', data.pack2_soc);\nglobal.set('jackery_pack2_energy_kwh', data.pack2_energy_kwh);\n\nglobal.set('jackery_pv_power', data.pv_power);\nglobal.set('jackery_pv1_power', data.pv1_power);\nglobal.set('jackery_pv2_power', data.pv2_power);\n\nglobal.set('jackery_grid_power', data.grid_power);\nglobal.set('jackery_ac_main_power', data.ac_main_power);\nglobal.set('jackery_other_load_power', data.other_load_power);\nglobal.set('jackery_eps_load_power', data.eps_load_power);\n\nglobal.set('jackery_raw', root);\n\nmsg.payload = data;\n\nnode.status({\n    fill: 'green',\n    shape: 'dot',\n    text: `SOC ${data.battery_soc ?? '?'}% | reste ${data.battery_energy_kwh ?? '?'} kWh | load ${data.other_load_power ?? '?'}W`\n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1110,
+        "y": 220,
+        "wires": [
+            [
+                "debug_jackery_normalized",
+                "fn_domoticz_jackery",
+                "fn_ecs_logic"
+            ]
+        ]
+    },
+    {
+        "id": "debug_jackery_normalized",
+        "type": "debug",
+        "z": "tab_jackery_home_cloud",
+        "name": "Jackery normalisé",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1370,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "fn_domoticz_jackery",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Domoticz - Jackery",
+        "func": "// Mets ici tes IDX Domoticz.\n// Laisse 0 pour désactiver une donnée.\nconst IDX_BATTERY_SOC = 0;\nconst IDX_PV_POWER = 0;\nconst IDX_GRID_POWER = 0;\nconst IDX_LOAD_POWER = 0;\nconst IDX_BATTERY_POWER = 0;\n\nlet d = msg.payload;\nlet out = [];\n\nfunction pushDomoticz(idx, value) {\n    if (!idx || value === undefined || value === null || isNaN(Number(value))) return;\n    out.push({\n        topic: 'domoticz/in',\n        payload: {\n            command: 'udevice',\n            idx: idx,\n            nvalue: 0,\n            svalue: String(Math.round(Number(value)))\n        }\n    });\n}\n\npushDomoticz(IDX_BATTERY_SOC, d.battery_soc);\npushDomoticz(IDX_PV_POWER, d.pv_power);\npushDomoticz(IDX_GRID_POWER, d.grid_power);\npushDomoticz(IDX_LOAD_POWER, d.load_power);\npushDomoticz(IDX_BATTERY_POWER, d.battery_power);\n\nreturn [out];",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1360,
+        "y": 240,
+        "wires": [
+            [
+                "mqtt_domoticz_in"
+            ]
+        ]
+    },
+    {
+        "id": "fn_ecs_logic",
+        "type": "function",
+        "z": "tab_jackery_home_cloud",
+        "name": "Logique ECS batterie > 80%",
+        "func": "let soc = msg.payload.battery_soc;\nlet batteryEnergy = msg.payload.battery_energy_kwh;\nlet pv = msg.payload.pv_power || 0;\nlet load = msg.payload.other_load_power || 0;\n\n// ===== Réglages =====\nconst ON_SOC = 80;\nconst OFF_SOC = 70;\n\n// Durée mini entre deux changements d'état\nconst MIN_CHANGE_DELAY_MIN = 10;\n\n// Température ECS max de sécurité\n// Mets null si tu ne veux pas utiliser la température.\nconst ECS_MAX_TEMP = 63;\n\n// Adapte ce nom à ta vraie variable globale si besoin\nlet ecsTemp = global.get(\"TempBallonECS\");\n\n// État précédent\nlet state = flow.get(\"ecs_jackery_state\") || \"OFF\";\nlet lastChange = flow.get(\"ecs_jackery_last_change\") || 0;\n\nlet now = Date.now();\nlet canChange = (now - lastChange) > MIN_CHANGE_DELAY_MIN * 60 * 1000;\n\nlet reason = \"Maintien état précédent\";\n\n// Sécurité température ECS\nif (ECS_MAX_TEMP !== null && ecsTemp !== undefined && Number(ecsTemp) >= ECS_MAX_TEMP) {\n    if (state !== \"OFF\" && canChange) {\n        state = \"OFF\";\n        flow.set(\"ecs_jackery_last_change\", now);\n    }\n    reason = \"Température ECS max atteinte\";\n}\n// Batterie basse : OFF\nelse if (soc !== undefined && soc <= OFF_SOC) {\n    if (state !== \"OFF\" && canChange) {\n        state = \"OFF\";\n        flow.set(\"ecs_jackery_last_change\", now);\n    }\n    reason = \"Batterie <= \" + OFF_SOC + \"%\";\n}\n// Batterie haute : ON\nelse if (soc !== undefined && soc >= ON_SOC) {\n    if (state !== \"ON\" && canChange) {\n        state = \"ON\";\n        flow.set(\"ecs_jackery_last_change\", now);\n    }\n    reason = \"Batterie >= \" + ON_SOC + \"%\";\n}\n// Hystérésis\nelse {\n    reason = \"SOC entre \" + OFF_SOC + \"% et \" + ON_SOC + \"% : maintien \" + state;\n}\n\nflow.set(\"ecs_jackery_state\", state);\nglobal.set(\"ecs_jackery_state\", state);\n\nmsg.payload = {\n    ecs: state,\n    battery_soc: soc,\n    battery_energy_kwh: batteryEnergy,\n    pv_power: pv,\n    other_load_power: load,\n    ecs_temp: ecsTemp,\n    reason: reason\n};\n\nnode.status({\n    fill: state === \"ON\" ? \"green\" : \"grey\",\n    shape: \"dot\",\n    text: `ECS ${state} | SOC ${soc ?? \"?\"}% | ${reason}`\n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1390,
+        "y": 320,
+        "wires": [
+            [
+                "debug_ecs_state"
+            ]
+        ],
+        "info": "// Logique simple avec hystérésis :\n// Batterie >= 80% -> ECS ON\n// Batterie <= 70% -> ECS OFF\n// Entre 70 et 80 : on garde l'état précédent.\n\nlet soc = msg.payload.battery_soc;\nlet pv = msg.payload.pv_power || 0;\nlet load = msg.payload.load_power || 0;\n\nconst ON_SOC = 80;\nconst OFF_SOC = 70;\n\nlet state = flow.get('ecs_jackery_state') || 'OFF';\n\nif (soc !== undefined) {\n    if (soc >= ON_SOC) {\n        state = 'ON';\n    } else if (soc <= OFF_SOC) {\n        state = 'OFF';\n    }\n}\n\nflow.set('ecs_jackery_state', state);\nglobal.set('ecs_jackery_state', state);\n\nmsg.payload = {\n    ecs: state,\n    battery_soc: soc,\n    pv_power: pv,\n    load_power: load,\n    reason: state === 'ON' ? 'Batterie >= ' + ON_SOC + '%' : 'Batterie <= ' + OFF_SOC + '% ou maintien état OFF'\n};\n\nreturn msg;"
+    },
+    {
+        "id": "debug_ecs_state",
+        "type": "debug",
+        "z": "tab_jackery_home_cloud",
+        "name": "Décision ECS",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 1620,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "inject_jackery_poll",
+        "type": "inject",
+        "z": "tab_jackery_home_cloud",
+        "name": "Poll Jackery 30s",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "30",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "3",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 160,
+        "y": 100,
+        "wires": [
+            [
+                "fn_jackery_route"
+            ]
+        ]
+    }
+]
